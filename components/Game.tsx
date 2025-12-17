@@ -1,17 +1,21 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { TargetEntity, GameState, Point, TargetValue, HighScore, PlayerState, PlayerSettings } from '../types';
+import { TargetEntity, GameState, Point, TargetValue, HighScore, PlayerSettings } from '../types';
 import { TARGET_CONFIG, MAX_SHOTS, BASE_SPEED, BULLSEYE_RATIO } from '../constants';
 import { Target } from './Target';
 import { Scope } from './Scope';
 import { ScorePanel } from './ScorePanel';
-import { playShootSound, playHitSound, playBullseyeSound, playEmptyClick, playMachineGunSound } from '../utils/audio';
-import { Settings, X, Upload, Save, User, Clock, Disc, Flame, Target as TargetIcon, Infinity as InfinityIcon, Users, Play } from 'lucide-react';
+import { playShootSound, playHitSound, playBullseyeSound, playEmptyClick } from '../utils/audio';
+import { Settings, X, Upload, Save, User, Clock, Disc, Target as TargetIcon, Users, Play, Gift, ExternalLink } from 'lucide-react';
 
 // Utility to generate random ID
 const uuid = () => Math.random().toString(36).substr(2, 9);
 
 // Offset for mobile touch to make scope visible above finger
 const TOUCH_Y_OFFSET = 100;
+
+// Ad Configuration
+const AD_DAILY_CAP = 5;
+const AD_CHANCE = 0.4; // 40% chance to show ad on game over
 
 // Default settings constant
 const DEFAULT_SETTINGS: PlayerSettings = {
@@ -40,6 +44,43 @@ const loadSavedSettings = (): PlayerSettings => {
   return DEFAULT_SETTINGS;
 };
 
+// Helper for Ad Tracking
+const checkAdEligibility = (): boolean => {
+    try {
+        const today = new Date().toLocaleDateString();
+        const stored = localStorage.getItem('sniper_ad_tracker');
+        if (stored) {
+            const data = JSON.parse(stored);
+            if (data.date !== today) {
+                // New day, reset
+                localStorage.setItem('sniper_ad_tracker', JSON.stringify({ date: today, count: 0 }));
+                return true;
+            }
+            return data.count < AD_DAILY_CAP;
+        }
+        // No data, init
+        localStorage.setItem('sniper_ad_tracker', JSON.stringify({ date: today, count: 0 }));
+        return true;
+    } catch (e) {
+        return true;
+    }
+};
+
+const incrementAdCount = () => {
+    try {
+        const today = new Date().toLocaleDateString();
+        const stored = localStorage.getItem('sniper_ad_tracker');
+        let count = 0;
+        if (stored) {
+            const data = JSON.parse(stored);
+            if (data.date === today) count = data.count;
+        }
+        localStorage.setItem('sniper_ad_tracker', JSON.stringify({ date: today, count: count + 1 }));
+    } catch (e) {
+        console.error(e);
+    }
+};
+
 export const Game: React.FC = () => {
   // --- State ---
   // Initialize state using a function to load settings only once on mount
@@ -54,8 +95,6 @@ export const Game: React.FC = () => {
       round: 1,
       timeLeft: initialSettings.roundDuration, // Use loaded duration
       totalTimePlayed: 0,
-      isRapidFire: false,
-      rapidFireShotsLeft: 0,
       lastHit: null,
       hitHistory: [],
       playerSettings: initialSettings,
@@ -71,7 +110,7 @@ export const Game: React.FC = () => {
   const [targets, setTargets] = useState<TargetEntity[]>([]);
   const [aimPosition, setAimPosition] = useState<Point | null>(null);
   
-  // Track if user is holding down the mouse/touch (for rapid fire)
+  // Track if user is holding down the mouse/touch (just for scope visibility now)
   const [isHolding, setIsHolding] = useState(false);
   
   // High Scores State
@@ -83,6 +122,11 @@ export const Game: React.FC = () => {
   // Settings UI State
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [tempSettings, setTempSettings] = useState(gameState.playerSettings);
+
+  // Ad State
+  const [showAd, setShowAd] = useState(false);
+  const adTriggeredRef = useRef(false); // To prevent double firing in one round end
+  const [sessionRewardActive, setSessionRewardActive] = useState(false);
 
   // Visual state for celebration text
   const [celebration, setCelebration] = useState<{ text: string, x: number, y: number, id: number } | null>(null);
@@ -121,8 +165,7 @@ export const Game: React.FC = () => {
     if (gameState.totalScore <= 0 || gameState.playerSettings.isTrainingMode || gameState.playerSettings.gameMode === 'MULTI_LOCAL') return;
 
     setHighScores(prevScores => {
-        // Calculate shots excluding rapid fire for stats
-        const normalShots = gameState.hitHistory.filter(h => !h.isRapidFire).length || 1;
+        const normalShots = gameState.hitHistory.length || 1;
         
         const currentEntry: HighScore = {
             sessionId: sessionIdRef.current,
@@ -152,6 +195,64 @@ export const Game: React.FC = () => {
     });
 
   }, [gameState.totalScore, gameState.hitHistory, gameState.totalTimePlayed, gameState.playerSettings.nickname, gameState.playerSettings.isTrainingMode, gameState.playerSettings.gameMode]);
+
+
+  // --- Ad Logic ---
+  useEffect(() => {
+      // Check if game is over (Time out OR Ammo out)
+      const isUnlimitedTime = gameState.playerSettings.isUnlimitedTime;
+      const isUnlimitedAmmo = gameState.playerSettings.isUnlimitedAmmo;
+      
+      const isTimeOut = !isUnlimitedTime && gameState.timeLeft === 0;
+      const isAmmoOut = !isUnlimitedAmmo && gameState.shotsLeft === 0;
+
+      if ((isTimeOut || isAmmoOut) && !gameState.isTurnTransition && !isSettingsOpen) {
+          if (!adTriggeredRef.current) {
+              adTriggeredRef.current = true;
+              
+              // Only trigger if we don't already have the reward and rng passes
+              if (!sessionRewardActive && Math.random() < AD_CHANCE) {
+                   if (checkAdEligibility()) {
+                       setTimeout(() => {
+                           setShowAd(true);
+                           incrementAdCount();
+                       }, 500); // Slight delay after game over
+                   }
+              }
+          }
+      } else {
+          // Reset trigger when game is running
+          if (!isTimeOut && !isAmmoOut) {
+            adTriggeredRef.current = false;
+          }
+      }
+  }, [gameState.timeLeft, gameState.shotsLeft, gameState.playerSettings.isUnlimitedTime, gameState.playerSettings.isUnlimitedAmmo, gameState.isTurnTransition, isSettingsOpen, sessionRewardActive]);
+
+  const handleAdClick = () => {
+      // User clicked the ad -> Enable session rewards
+      setSessionRewardActive(true);
+      setShowAd(false);
+      
+      setGameState(prev => ({
+          ...prev,
+          playerSettings: {
+              ...prev.playerSettings,
+              isUnlimitedAmmo: true,
+              isUnlimitedTime: true
+          },
+          // Give them a fresh start immediately for this round if they want, 
+          // OR usually they would click "Next Game". 
+          // Let's just update settings, the user will see infinity icons update.
+      }));
+
+      // Celebration for reward
+      setCelebration({ text: "ÖDÜL AKTİF!", x: window.innerWidth / 2, y: window.innerHeight / 2, id: Date.now() });
+      setTimeout(() => setCelebration(null), 2000);
+  };
+
+  const handleAdClose = () => {
+      setShowAd(false);
+  };
 
 
   // --- Settings Handlers ---
@@ -186,8 +287,6 @@ export const Game: React.FC = () => {
             timeLeft: tempSettings.roundDuration,
             totalTimePlayed: 0,
             hitHistory: [],
-            isRapidFire: false,
-            rapidFireShotsLeft: 0,
             lastHit: null,
             playerSettings: tempSettings,
             activePlayerIndex: 0, // Reset to Player 1
@@ -232,14 +331,14 @@ export const Game: React.FC = () => {
 
     const isUnlimited = gameState.playerSettings.isUnlimitedAmmo;
     const isUnlimitedTime = gameState.playerSettings.isUnlimitedTime;
-    const canPlay = isUnlimited || gameState.shotsLeft > 0 || gameState.isRapidFire;
+    const canPlay = isUnlimited || gameState.shotsLeft > 0;
 
-    // Pause timer during settings or turn transitions
-    if (isSettingsOpen || gameState.isTurnTransition || !canPlay || (!isUnlimitedTime && gameState.timeLeft <= 0)) {
+    // Pause timer during settings or turn transitions or ad
+    if (isSettingsOpen || gameState.isTurnTransition || showAd || !canPlay || (!isUnlimitedTime && gameState.timeLeft <= 0)) {
         if (!canPlay) return;
     }
 
-    if (isSettingsOpen || gameState.isTurnTransition) return;
+    if (isSettingsOpen || gameState.isTurnTransition || showAd) return;
 
     timerRef.current = setInterval(() => {
       setGameState(prev => {
@@ -258,7 +357,7 @@ export const Game: React.FC = () => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [gameState.isPlaying, gameState.shotsLeft, isSettingsOpen, gameState.round, gameState.isRapidFire, gameState.playerSettings.isUnlimitedAmmo, gameState.playerSettings.isUnlimitedTime, gameState.isTurnTransition]);
+  }, [gameState.isPlaying, gameState.shotsLeft, isSettingsOpen, gameState.round, gameState.playerSettings.isUnlimitedAmmo, gameState.playerSettings.isUnlimitedTime, gameState.isTurnTransition, showAd]);
 
 
   // --- Game Loop Logic ---
@@ -295,8 +394,7 @@ export const Game: React.FC = () => {
   const updatePositions = useCallback(() => {
     setTargets(prevTargets => {
       return prevTargets.map(t => {
-        // If dying, don't move it, or maybe slow it down? 
-        // Let's keep moving it for physics feel, but maybe slightly slower or just same
+        // If dying, don't move it
         if (t.isHit) return t; 
 
         let nextX = t.x + t.dx;
@@ -321,7 +419,7 @@ export const Game: React.FC = () => {
     const isUnlimitedTime = gameState.playerSettings.isUnlimitedTime;
     
     // Pause loop during transitions
-    if ((isUnlimited || gameState.shotsLeft > 0 || gameState.isRapidFire) && (isUnlimitedTime || gameState.timeLeft > 0) && !isSettingsOpen && !gameState.isTurnTransition) {
+    if ((isUnlimited || gameState.shotsLeft > 0) && (isUnlimitedTime || gameState.timeLeft > 0) && !isSettingsOpen && !gameState.isTurnTransition && !showAd) {
       updatePositions();
       
       const isTraining = gameState.playerSettings.isTrainingMode;
@@ -338,7 +436,7 @@ export const Game: React.FC = () => {
       }
     }
     requestRef.current = requestAnimationFrame(loop);
-  }, [gameState.shotsLeft, gameState.timeLeft, spawnTarget, updatePositions, isSettingsOpen, gameState.isRapidFire, gameState.playerSettings.isTrainingMode, gameState.playerSettings.isUnlimitedAmmo, gameState.playerSettings.isUnlimitedTime, gameState.isTurnTransition]);
+  }, [gameState.shotsLeft, gameState.timeLeft, spawnTarget, updatePositions, isSettingsOpen, gameState.playerSettings.isTrainingMode, gameState.playerSettings.isUnlimitedAmmo, gameState.playerSettings.isUnlimitedTime, gameState.isTurnTransition, showAd]);
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(loop);
@@ -349,22 +447,8 @@ export const Game: React.FC = () => {
 
   // --- Shooting Logic ---
 
-  const activateRapidFire = () => {
-    setGameState(prev => ({ 
-        ...prev, 
-        isRapidFire: true,
-        rapidFireShotsLeft: 100 
-    }));
-    
-    setCelebration({ text: "MACHINE GUN! (100)", x: window.innerWidth / 2, y: window.innerHeight / 2, id: Date.now() });
-    
-    setTimeout(() => {
-        setCelebration(null);
-    }, 1500);
-  };
-
-  const triggerShot = useCallback((isRapid: boolean) => {
-    if (isSettingsOpen || gameState.isTurnTransition) return;
+  const triggerShot = useCallback(() => {
+    if (isSettingsOpen || gameState.isTurnTransition || showAd) return;
     
     const currentAim = aimPosRef.current;
     if (!currentAim || !containerRef.current) return;
@@ -375,17 +459,12 @@ export const Game: React.FC = () => {
     const hasAmmo = isUnlimited || gameState.shotsLeft > 0;
     
     // Check constraints
-    if ((!hasAmmo && !isRapid) || (!isUnlimitedTime && gameState.timeLeft <= 0)) {
-       if (!isRapid) playEmptyClick();
+    if (!hasAmmo || (!isUnlimitedTime && gameState.timeLeft <= 0)) {
+       playEmptyClick();
        return;
     }
 
-    // Audio
-    if (isRapid) {
-        playMachineGunSound();
-    } else {
-        playShootSound();
-    }
+    playShootSound();
 
     const elements = document.elementsFromPoint(currentAim.x, currentAim.y);
     const targetElement = elements.find(el => el.getAttribute('data-target-id'));
@@ -395,6 +474,7 @@ export const Game: React.FC = () => {
     let isBullseye = false;
     let hitValue: TargetValue | 0 = 0;
     let spawnedTargets: TargetEntity[] = [];
+    let ammoBonus = 0;
 
     if (targetElement) {
         hitTargetId = targetElement.getAttribute('data-target-id');
@@ -423,7 +503,9 @@ export const Game: React.FC = () => {
 
             if (isBullseye && hitTargetId) {
                 if (hitValue === 100) {
-                    activateRapidFire();
+                   if (!isUnlimited) {
+                       ammoBonus = 2; // Add 2 bullets bonus
+                   }
                 } 
                 else if (!isTraining) {
                     let nextValue: TargetValue | null = null;
@@ -455,18 +537,17 @@ export const Game: React.FC = () => {
         }
     }
 
-    const shouldConsumeAmmo = !isRapid && !isUnlimited;
+    const shouldConsumeAmmo = !isUnlimited;
 
     if (hitTargetId) {
-       if (!isRapid) {
-           if (isBullseye) {
-               playBullseyeSound();
-               if (hitValue !== 100) { 
-                  setCelebration({ text: spawnedTargets.length > 0 ? "SPLIT x3!" : "PERFECT SHOT!", x: currentAim.x, y: currentAim.y, id: Date.now() });
-                  setTimeout(() => setCelebration(null), 1000);
-               }
-           } else {
-               playHitSound();
+       if (isBullseye) {
+           playBullseyeSound();
+           if (hitValue === 100 && ammoBonus > 0) {
+               setCelebration({ text: "+2 MERMİ!", x: currentAim.x, y: currentAim.y, id: Date.now() });
+               setTimeout(() => setCelebration(null), 1000);
+           } else if (hitValue !== 100) { 
+              setCelebration({ text: spawnedTargets.length > 0 ? "SPLIT x3!" : "PERFECT SHOT!", x: currentAim.x, y: currentAim.y, id: Date.now() });
+              setTimeout(() => setCelebration(null), 1000);
            }
        } else {
            playHitSound();
@@ -489,9 +570,6 @@ export const Game: React.FC = () => {
        }, 500);
        
        setGameState(prev => {
-          const nextRapidShots = isRapid ? prev.rapidFireShotsLeft - 1 : prev.rapidFireShotsLeft;
-          const shouldEndRapid = isRapid && nextRapidShots <= 0;
-          
           const newCurrentScore = prev.currentScore + pointsAwarded;
           
           // Update Current Player Stats immediately
@@ -505,9 +583,8 @@ export const Game: React.FC = () => {
 
           return {
             ...prev,
-            shotsLeft: shouldConsumeAmmo ? prev.shotsLeft - 1 : prev.shotsLeft,
-            rapidFireShotsLeft: nextRapidShots,
-            isRapidFire: shouldEndRapid ? false : prev.isRapidFire,
+            // Consumes 1 ammo if not unlimited, but adds ammoBonus (2) if earned. Net +1 if bonus earned.
+            shotsLeft: (shouldConsumeAmmo ? prev.shotsLeft - 1 : prev.shotsLeft) + ammoBonus,
             currentScore: newCurrentScore,
             totalScore: prev.totalScore + pointsAwarded,
             players: updatedPlayers,
@@ -518,22 +595,16 @@ export const Game: React.FC = () => {
                 isBullseye,
                 value: hitValue,
                 timestamp: Date.now(),
-                totalScoreSnapshot: prev.currentScore + pointsAwarded,
-                isRapidFire: isRapid
+                totalScoreSnapshot: prev.currentScore + pointsAwarded
             }]
           };
       });
     } else {
         // Miss
         setGameState(prev => {
-            const nextRapidShots = isRapid ? prev.rapidFireShotsLeft - 1 : prev.rapidFireShotsLeft;
-            const shouldEndRapid = isRapid && nextRapidShots <= 0;
-
             return {
                 ...prev,
                 shotsLeft: shouldConsumeAmmo ? prev.shotsLeft - 1 : prev.shotsLeft,
-                rapidFireShotsLeft: nextRapidShots,
-                isRapidFire: shouldEndRapid ? false : prev.isRapidFire,
                 lastHit: null,
                 hitHistory: [...prev.hitHistory, {
                 id: uuid(),
@@ -541,19 +612,18 @@ export const Game: React.FC = () => {
                 isBullseye: false,
                 value: 0,
                 timestamp: Date.now(),
-                totalScoreSnapshot: prev.currentScore,
-                isRapidFire: isRapid
+                totalScoreSnapshot: prev.currentScore
                 }]
             };
         });
     }
-  }, [gameState.shotsLeft, gameState.timeLeft, isSettingsOpen, gameState.isTurnTransition, gameState.playerSettings.isTrainingMode, gameState.playerSettings.isUnlimitedAmmo, gameState.playerSettings.isUnlimitedTime]);
+  }, [gameState.shotsLeft, gameState.timeLeft, isSettingsOpen, gameState.isTurnTransition, gameState.playerSettings.isTrainingMode, gameState.playerSettings.isUnlimitedAmmo, gameState.playerSettings.isUnlimitedTime, showAd]);
 
 
   // --- Interaction Logic ---
 
   const handlePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
-    if (isSettingsOpen || gameState.isTurnTransition) return; 
+    if (isSettingsOpen || gameState.isTurnTransition || showAd) return; 
     
     const isTouch = 'touches' in e;
     const clientX = isTouch ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
@@ -565,7 +635,7 @@ export const Game: React.FC = () => {
   };
 
   const handlePointerMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isHolding && !gameState.isRapidFire && !aimPosition) return;
+    if (!isHolding && !aimPosition) return;
     
     const isTouch = 'touches' in e;
     const clientX = isTouch ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
@@ -577,32 +647,9 @@ export const Game: React.FC = () => {
 
   const handlePointerUp = () => {
     setIsHolding(false);
-    
-    if (gameState.isRapidFire) {
-        setGameState(prev => ({ ...prev, isRapidFire: false, rapidFireShotsLeft: 0 }));
-    } 
-    else {
-        triggerShot(false);
-    }
-    
+    triggerShot();
     setAimPosition(null);
   };
-
-  // --- Rapid Fire Interval ---
-  useEffect(() => {
-      let interval: ReturnType<typeof setInterval> | null = null;
-      
-      if (gameState.isRapidFire && isHolding && gameState.rapidFireShotsLeft > 0) {
-          triggerShot(true);
-          interval = setInterval(() => {
-              triggerShot(true);
-          }, 100); 
-      }
-
-      return () => {
-          if (interval) clearInterval(interval);
-      };
-  }, [gameState.isRapidFire, isHolding, gameState.rapidFireShotsLeft, triggerShot]);
 
   // --- Game Flow (Next Round / Next Turn) ---
 
@@ -620,7 +667,6 @@ export const Game: React.FC = () => {
                   shotsLeft: prev.playerSettings.maxAmmo,
                   timeLeft: prev.playerSettings.roundDuration,
                   currentScore: 0,
-                  isRapidFire: false,
                   hitHistory: [],
                   lastHit: null
               }));
@@ -635,7 +681,6 @@ export const Game: React.FC = () => {
                   shotsLeft: prev.playerSettings.maxAmmo,
                   timeLeft: prev.playerSettings.roundDuration,
                   currentScore: 0,
-                  isRapidFire: false,
                   hitHistory: [],
                   lastHit: null
               }));
@@ -649,8 +694,6 @@ export const Game: React.FC = () => {
               currentScore: 0,
               round: prev.round + 1,
               timeLeft: prev.playerSettings.roundDuration, 
-              isRapidFire: false,
-              rapidFireShotsLeft: 0,
               lastHit: null,
               hitHistory: [] 
           }));
@@ -667,7 +710,6 @@ export const Game: React.FC = () => {
           ...prev,
           shotsLeft: 0,
           timeLeft: 0,
-          isRapidFire: false,
           playerSettings: {
               ...prev.playerSettings,
               isUnlimitedAmmo: false,
@@ -908,6 +950,52 @@ export const Game: React.FC = () => {
           </div>
       )}
 
+      {/* Ad Modal */}
+      {showAd && (
+          <div className="absolute inset-0 z-[60] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-gradient-to-br from-slate-900 to-slate-800 border-2 border-yellow-500/50 w-full max-w-sm rounded-xl p-1 shadow-[0_0_50px_rgba(234,179,8,0.2)] relative overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+                  
+                  {/* Badge */}
+                  <div className="absolute top-2 right-2 bg-yellow-500 text-black text-[10px] font-black uppercase px-2 py-0.5 rounded shadow-lg">
+                      SPONSORLU BAĞLANTI
+                  </div>
+
+                  <div className="p-6 flex flex-col items-center text-center space-y-4">
+                      <div className="w-20 h-20 bg-yellow-500/10 rounded-full flex items-center justify-center border border-yellow-500/30 mb-2 relative">
+                          <Gift size={40} className="text-yellow-400 animate-bounce" />
+                          <div className="absolute inset-0 bg-yellow-400/20 rounded-full animate-ping opacity-20"></div>
+                      </div>
+
+                      <div>
+                          <h2 className="text-2xl font-black text-white italic tracking-tighter uppercase mb-1">
+                              ÖZEL TEKLİF!
+                          </h2>
+                          <p className="text-slate-300 text-sm leading-relaxed">
+                              Keskin nişancı yeteneklerini bir üst seviyeye taşı. Bu reklama tıklayarak bu oturum boyunca sınırsız güce eriş!
+                          </p>
+                      </div>
+
+                      <div className="flex flex-col gap-2 w-full pt-2">
+                          <button 
+                            onClick={handleAdClick}
+                            className="bg-gradient-to-r from-yellow-600 to-yellow-500 hover:from-yellow-500 hover:to-yellow-400 text-black font-black py-3 px-4 rounded-lg shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 uppercase tracking-wide group"
+                          >
+                              <ExternalLink size={18} className="group-hover:translate-x-1 transition-transform" />
+                              Ödülü Al: Sınırsız Mod
+                          </button>
+                          
+                          <button 
+                            onClick={handleAdClose}
+                            className="text-slate-500 hover:text-white text-xs font-bold py-2 transition-colors uppercase"
+                          >
+                              Hayır, Teşekkürler
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Game Area (1/2) */}
       <div 
         ref={containerRef}
@@ -941,15 +1029,7 @@ export const Game: React.FC = () => {
             ))}
         </div>
 
-        {!isSettingsOpen && !gameState.isTurnTransition && <Scope position={aimPosition} />}
-
-        {gameState.isRapidFire && (
-            <div className="absolute top-8 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-                <div className="flex items-center gap-1 bg-red-600/90 text-white font-black px-2 py-1 rounded text-sm animate-pulse border border-yellow-400 shadow-[0_0_10px_red]">
-                    <Flame size={12}/> MACHINE GUN ({gameState.rapidFireShotsLeft}) <Flame size={12}/>
-                </div>
-            </div>
-        )}
+        {!isSettingsOpen && !gameState.isTurnTransition && !showAd && <Scope position={aimPosition} />}
 
         {celebration && (
             <div 
@@ -962,7 +1042,7 @@ export const Game: React.FC = () => {
             </div>
         )}
 
-        {((gameState.shotsLeft === 0 && !gameState.isRapidFire && !gameState.playerSettings.isUnlimitedAmmo) || (!gameState.playerSettings.isUnlimitedTime && gameState.timeLeft === 0)) && !isSettingsOpen && !gameState.isTurnTransition && (
+        {((gameState.shotsLeft === 0 && !gameState.playerSettings.isUnlimitedAmmo) || (!gameState.playerSettings.isUnlimitedTime && gameState.timeLeft === 0)) && !isSettingsOpen && !gameState.isTurnTransition && !showAd && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/60 pointer-events-none backdrop-blur-[2px] z-40">
                 <div className="flex flex-col items-center">
                     <h1 className="text-4xl font-black text-white uppercase tracking-tighter drop-shadow-lg transform -rotate-12 border-4 border-white p-4 mb-2">

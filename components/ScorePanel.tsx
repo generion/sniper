@@ -15,7 +15,7 @@ interface ScorePanelProps {
 export const ScorePanel: React.FC<ScorePanelProps> = ({ gameState, highScores, onReset, onNextRound, onFinishGame, currentSessionId }) => {
   const isUnlimitedTime = gameState.playerSettings.isUnlimitedTime;
   const isUnlimitedAmmo = gameState.playerSettings.isUnlimitedAmmo;
-  const isRoundOver = (gameState.shotsLeft === 0 && !isUnlimitedAmmo && !gameState.isRapidFire) || (!isUnlimitedTime && gameState.timeLeft === 0);
+  const isRoundOver = (gameState.shotsLeft === 0 && !isUnlimitedAmmo) || (!isUnlimitedTime && gameState.timeLeft === 0);
   const isMultiplayer = gameState.playerSettings.gameMode === 'MULTI_LOCAL';
 
   // Calculate Percentage for Time Bar
@@ -24,10 +24,9 @@ export const ScorePanel: React.FC<ScorePanelProps> = ({ gameState, highScores, o
   const isLowTime = gameState.timeLeft <= 5;
 
   // Stats Calculation
-  const normalShots = gameState.hitHistory.filter(h => !h.isRapidFire);
-  const totalNormalShots = normalShots.length;
-  // Avg score uses total normal shots (not rapid fire) as divisor
-  const avgScore = totalNormalShots > 0 ? (gameState.totalScore / totalNormalShots).toFixed(1) : "0.0";
+  const totalShots = gameState.hitHistory.length;
+  // Avg score uses total shots as divisor
+  const avgScore = totalShots > 0 ? (gameState.totalScore / totalShots).toFixed(1) : "0.0";
   const displayTotalShots = gameState.hitHistory.length;
 
   // Colors for Top 5 ranking
@@ -296,11 +295,7 @@ export const ScorePanel: React.FC<ScorePanelProps> = ({ gameState, highScores, o
                     {/* Ammo Display (Left) */}
                     <div className="flex flex-col items-start gap-0.5 min-w-[60px]">
                         <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Mermi</span>
-                        {gameState.isRapidFire ? (
-                            <div className="text-red-500 font-black text-xs animate-pulse">
-                                RAPID: {gameState.rapidFireShotsLeft}
-                            </div>
-                        ) : isUnlimitedAmmo ? (
+                        {isUnlimitedAmmo ? (
                             <div className="text-yellow-500 font-bold text-sm animate-pulse">
                                 <Infinity size={18} />
                             </div>

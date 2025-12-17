@@ -19,7 +19,6 @@ export interface HitRecord {
   value: TargetValue | 0; // 0 represents a miss
   timestamp: number;
   totalScoreSnapshot: number; // Score after this shot
-  isRapidFire: boolean; // Was this shot fired during rapid fire mode?
 }
 
 export interface PlayerSettings {
@@ -49,8 +48,6 @@ export interface GameState {
   round: number;
   timeLeft: number; // Seconds remaining in current round
   totalTimePlayed: number; // Total seconds played across rounds in current session
-  isRapidFire: boolean; // Is machine gun mode active?
-  rapidFireShotsLeft: number; // Decrements from 100
   lastHit: {
     points: number;
     isBullseye: boolean;
@@ -75,7 +72,7 @@ export interface HighScore {
   score: number;
   name: string;
   date: string;
-  shots: number; // Total shots fired (excluding rapid fire for avg calc)
+  shots: number; // Total shots fired
   time: number;  // Total time played in seconds
   sessionId?: string; // Unique ID for the current session to allow auto-updates
 }
