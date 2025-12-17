@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Sniper Scope Challenge</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Prevent pull-to-refresh on mobile */
+      body {
+        overscroll-behavior-y: contain;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      /* Custom Scrollbar for High Score & Logs */
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 2px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.4);
+      }
+
+      /* Spin and Vanish Animation for Edge Hits */
+      @keyframes spin-vanish {
+        0% {
+          transform: rotate(0deg) scale(1);
+          opacity: 1;
+        }
+        50% {
+           opacity: 0.8;
+        }
+        100% {
+          transform: rotate(1080deg) scale(0);
+          opacity: 0;
+        }
+      }
+      
+      .animate-spin-vanish {
+        animation: spin-vanish 0.5s ease-in-out forwards;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "lucide-react": "https://esm.sh/lucide-react@^0.561.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+</head>
+  <body class="bg-gray-900 text-white overflow-hidden">
+    <div id="root"></div>
+  </body>
+</html>

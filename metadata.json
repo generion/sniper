@@ -1,0 +1,5 @@
+{
+  "name": "Sniper Scope Challenge",
+  "description": "A mobile-first reflex game where you snipe moving targets for points. Features zoom scope mechanics, dynamic difficulty, and high-score tracking.",
+  "requestFramePermissions": []
+}
